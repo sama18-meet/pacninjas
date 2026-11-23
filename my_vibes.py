@@ -122,29 +122,54 @@ class ReflexCaptureAgent(CaptureAgent):
 
 
 class OffensiveReflexAgent(ReflexCaptureAgent):
-    """
-  A reflex agent that seeks food. This is an agent
-  we give you to get an idea of what an offensive agent might look like,
-  but it is by no means the best or only way to build an offensive agent.
-  """
+    RETURN_AT = 3   # carried food that triggers a trip home
 
-    def get_features(self, game_state, action):
-        features = util.Counter()
-        successor = self.get_successor(game_state, action)
-        food_list = self.get_food(successor).as_list()
-        features['successor_score'] = -len(food_list)  # self.getScore(successor)
+    def register_initial_state(self, game_state):
+        super().register_initial_state(game_state)
+        walls = game_state.get_walls()
+        mid = walls.width // 2
+        x = mid - 1 if self.red else mid
+        self.home_border = [(x, y) for y in range(walls.height) if not walls[x][y]]
+        self.history = []
 
-        # Compute distance to the nearest food
+    def choose_action(self, game_state):
+        me = game_state.get_agent_state(self.index)
+        pos = me.get_position()
+        carrying = me.num_carrying
+        food = self.get_food(game_state).as_list()
 
-        if len(food_list) > 0:  # This should always be True,  but better safe than sorry
-            my_pos = successor.get_agent_state(self.index).get_position()
-            min_distance = min([self.get_maze_distance(my_pos, food) for food in food_list])
-            features['distance_to_food'] = min_distance
-        return features
+        # Decide the target set ONCE, from the current state
+        going_home = carrying >= self.RETURN_AT or (carrying > 0 and len(food) <= 2)
+        targets = self.home_border if (going_home or not food) else food
 
-    def get_weights(self, game_state, action):
-        return {'successor_score': 100, 'distance_to_food': -1}
+        rev = Directions.REVERSE[me.configuration.direction]
+        actions = [a for a in game_state.get_legal_actions(self.index)
+                   if a != Directions.STOP]
+        if not actions:
+            return Directions.STOP
 
+        # Anti-loop: last 8 positions cover 2 or fewer distinct cells
+        self.history.append(pos)
+        self.history = self.history[-8:]
+        if len(self.history) == 8 and len(set(self.history)) <= 2:
+            self.history = []
+            non_rev = [a for a in actions if a != rev] or actions
+            return random.choice(non_rev)
+
+        scored = []
+        for a in actions:
+            succ = self.get_successor(game_state, a)
+            s_state = succ.get_agent_state(self.index)
+            s_pos = s_state.get_position()
+            score = -min(self.get_maze_distance(s_pos, t) for t in targets)
+            if carrying > 0 and not s_state.is_pacman:
+                score += 1000          # this action deposits the food
+            if a == rev:
+                score -= 0.5           # tie-breaker only
+            scored.append((score, a))
+
+        best = max(s for s, _ in scored)
+        return random.choice([a for s, a in scored if s == best])
 
 class DefensiveReflexAgent(ReflexCaptureAgent):
     """
