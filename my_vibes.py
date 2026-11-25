@@ -479,9 +479,20 @@ class OffensiveReflexAgent(ReflexCaptureAgent):
         food_cost = min([tree[f][0] for f in food_ok] or [self.INF])
         moves_left = game_state.data.timeleft // 4
 
+        # Enemy state is readable even when its position is hidden: how much
+        # food it holds (num_carrying) is food it will still bank. If our lead
+        # is bigger than everything the enemy can still score, the result is
+        # decided, so food we carry is not worth risking.
+        enemy_carry = sum(game_state.get_agent_state(i).num_carrying
+                          for i in self.get_opponents(game_state))
+        enemy_max_gain = len(self.get_food_you_are_defending(game_state).as_list()) + enemy_carry
+        decided = self.get_score(game_state) > enemy_max_gain
+
         # ---- Mode: collect, or return (sticky until the food is deposited)
         if carrying == 0:
             self.mode = 'collect'
+        elif decided:
+            self.mode = 'return'
         elif self.mode != 'return':
             if (self.margin(pos, exits) < self.TURN_HOME_MARGIN   # a ghost is cutting us off
                     or carrying >= self.load_limit               # big load: bank it
